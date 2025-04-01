@@ -1,0 +1,203 @@
+service: imgproc-v2
+
+frameworkVersion: '3.38.0'
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  stage: dev
+  region: ${self:custom.region}
+  memorySize: 512
+  timeout: 30
+  environment:
+    BUCKET_NAME: ${self:custom.bucketName}
+    REGION: ${self:custom.region}
+    STAGE: ${opt:stage, self:provider.stage}
+  apiGateway:
+    shouldStartNameWithService: true
+  layers:
+    - {Ref: SharpLambdaLayer}
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - s3:PutObject
+        - s3:PutObjectAcl
+        - s3:GetObject
+        - s3:ListBucket
+        - s3:DeleteObject
+        - s3:DeleteObjects
+      Resource:
+        - arn:aws:s3:::${self:custom.bucketName}
+        - arn:aws:s3:::${self:custom.bucketName}/*
+
+plugins:
+  - serverless-plugin-typescript
+  - serverless-offline
+  - serverless-dotenv-plugin
+
+custom:
+  dotenv:
+    include:
+      - BUCKET_NAME
+      - REGION
+      - LAYER_BUCKET_NAME
+  bucketName: ${env:BUCKET_NAME, ''}
+  region: ${env:REGION, 'us-east-2'}
+  layerBucketName: ${self:custom.bucketName}
+
+package:
+  individually: true
+  patterns:
+    - '!node_modules/.prisma/**'
+    - '!node_modules/@prisma/**'
+    - '!node_modules/prisma/**'
+    - 'node_modules/**'
+    - '!.gitignore'
+    - '!.git/**'
+    - '!.env'
+    - '!.env.*'
+
+resources:
+  Resources:
+    SharpLambdaLayer:
+      Type: AWS::Lambda::LayerVersion
+      Properties:
+        LayerName: sharp-layer
+        Description: Layer for sharp image processing
+        Content:
+          S3Bucket: ${env:LAYER_BUCKET_NAME}
+          S3Key: layers/sharp.zip
+        CompatibleRuntimes:
+          - nodejs18.x
+
+    ImageBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${env:BUCKET_NAME}
+        CorsConfiguration:
+          CorsRules:
+            - AllowedHeaders: ['*']
+              AllowedMethods: [GET, PUT, POST, DELETE, HEAD]
+              AllowedOrigins: ['*']
+              MaxAge: 3000
+              
+    GatewayResponseDefault4XX:
+      Type: 'AWS::ApiGateway::GatewayResponse'
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+        ResponseType: DEFAULT_4XX
+        RestApiId:
+          Ref: 'ApiGatewayRestApi'
+          
+    GatewayResponseDefault5XX:
+      Type: 'AWS::ApiGateway::GatewayResponse'
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+        ResponseType: DEFAULT_5XX
+        RestApiId:
+          Ref: 'ApiGatewayRestApi'
+
+functions:
+  uploadImage:
+    handler: src/handlers/upload.handler
+    events:
+      - http:
+          path: /upload
+          method: post
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+              - X-Amz-Date
+              - Authorization
+              - X-Api-Key
+            methods:
+              - OPTIONS
+              - POST
+              - GET
+            allowCredentials: true
+
+  processImage:
+    handler: src/handlers/process.handler
+    memorySize: 512
+    timeout: 60
+    layers:
+      - {Ref: SharpLambdaLayer}
+    events:
+      - http:
+          path: /process
+          method: post
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+              - X-Amz-Date
+              - Authorization
+              - X-Api-Key
+              - X-Amz-Security-Token
+              - X-Amz-User-Agent
+            methods:
+              - POST
+              - OPTIONS
+            allowCredentials: false
+
+
+  getImages:
+    handler: src/handlers/list.handler
+    events:
+      - http:
+          path: /images
+          method: get
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+              - X-Amz-Date
+              - Authorization
+              - X-Api-Key
+            methods:
+              - OPTIONS
+              - POST
+              - GET
+            allowCredentials: true
+
+  download:
+    handler: src/handlers/download.handler
+    events:
+      - http:
+          path: /download/{filename}
+          method: get
+          cors:
+            origin: 'http://localhost:3000'
+            headers:
+              - Content-Type
+              - X-Amz-Date
+              - Authorization
+              - X-Api-Key
+              - X-Amz-Security-Token
+              - X-Amz-User-Agent
+            allowCredentials: false
+          request:
+            parameters:
+              paths:
+                filename: true
+
+  cleanup:
+    handler: src/handlers/cleanup.handler
+    events:
+      - schedule: rate(1 hour)
+
+  deleteImage:
+    handler: src/handlers/delete.handler
+    events:
+      - http:
+          path: /delete/{filename}
+          method: delete
+          cors: true
+    timeout: 300
+
+# Using manually created bucket instead of CloudFormation
