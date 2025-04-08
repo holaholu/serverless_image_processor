@@ -470,17 +470,6 @@ const Home = () => {
                 transition="all 0.2s"
               />
             </Link>
-            <Link href="https://www.linkedin.com/in/olaoluadisa/" isExternal>
-              <IconButton
-                aria-label="LinkedIn"
-                icon={<FaLinkedin />}
-                size="lg"
-                variant="ghost"
-                color="white"
-                _hover={{ transform: 'scale(1.1)', bg: 'whiteAlpha.200' }}
-                transition="all 0.2s"
-              />
-            </Link>
             <Link href="mailto:olaoluhimself@yahoo.com" isExternal>
               <IconButton
                 aria-label="Contact Me"
